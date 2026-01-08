@@ -1,0 +1,23 @@
+# Premier League Content Automation - Dependencies
+
+# Gemini AI
+google-generativeai>=0.8.0
+
+# Telegram Bot
+python-telegram-bot>=21.0
+
+# Google Sheets
+gspread>=6.0.0
+oauth2client>=4.1.3
+
+# HTTP Requests
+requests>=2.31.0
+
+# Apify Client
+apify-client>=1.6.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# Async support
+aiohttp>=3.9.0
