@@ -38,6 +38,7 @@ HEADERS = [
     "Topic",
     "Drama Score",
     "Topics Considered",  # Summary of all topics and their scores
+    "Source URL",  # URL of tweet/article to prevent duplicates
     "Script 1 - Hook",
     "Script 1 - Premise",
     "Script 1 - Punchline",
@@ -90,7 +91,7 @@ def _ensure_headers(worksheet: gspread.Worksheet) -> None:
     try:
         first_row = worksheet.row_values(1)
         if not first_row or first_row[0] == "":
-            worksheet.update("A1:M1", [HEADERS])  # A-M for 13 columns
+            worksheet.update("A1:N1", [HEADERS])  # A-N for 14 columns
             logger.info("Added headers to sheet")
     except Exception as e:
         logger.warning(f"Could not check/add headers: {str(e)}")
@@ -101,7 +102,8 @@ def append_result(
     topic: str,
     score: str,
     scripts: list[dict],
-    topics_summary: str = ""
+    topics_summary: str = "",
+    source_url: str = ""
 ) -> bool:
     """
     Append a new result row to the Google Sheet.
@@ -112,6 +114,7 @@ def append_result(
         score: Drama score with breakdown (e.g., "8/10 - Big 6 drama")
         scripts: List of 3 script dictionaries with hook/premise/punchline
         topics_summary: Summary of all topics considered and their scores
+        source_url: URL of the tweet/article (for deduplication)
 
     Returns:
         True if successful, False otherwise
@@ -126,7 +129,8 @@ def append_result(
             timestamp,
             topic,
             score,
-            topics_summary,  # New column for topics considered
+            topics_summary,
+            source_url,  # Track source URL to prevent duplicates
         ]
 
         # Add scripts (pad to 3 if less)
@@ -197,6 +201,36 @@ def get_recent_entries(count: int = 10) -> list[dict]:
     except Exception as e:
         logger.error(f"Failed to get recent entries: {str(e)}")
         return []
+
+
+def get_used_urls() -> set[str]:
+    """
+    Get all previously used source URLs from the sheet.
+
+    Used to prevent selecting the same tweet/article twice.
+
+    Returns:
+        Set of URL strings that have been used
+    """
+    try:
+        worksheet = connect_to_sheet()
+        all_values = worksheet.get_all_values()
+
+        # Skip header row
+        data_rows = all_values[1:] if len(all_values) > 1 else []
+
+        # Source URL is column 5 (index 4)
+        used_urls = set()
+        for row in data_rows:
+            if len(row) > 4 and row[4]:  # Check if URL column exists and has value
+                used_urls.add(row[4].strip())
+
+        logger.info(f"Found {len(used_urls)} previously used URLs")
+        return used_urls
+
+    except Exception as e:
+        logger.error(f"Failed to get used URLs: {str(e)}")
+        return set()
 
 
 # For testing

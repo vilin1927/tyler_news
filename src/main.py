@@ -134,7 +134,8 @@ async def run_pipeline(send_telegram_updates: bool = True) -> dict:
             topic=top_topic["topic"],
             score=f"{top_topic['score']}/10 - {top_topic.get('score_breakdown', '')}",
             scripts=scripts,
-            topics_summary=topics_summary
+            topics_summary=topics_summary,
+            source_url=top_topic.get("url", "")
         )
 
         # Step 9: Send completion notification

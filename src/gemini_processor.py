@@ -278,23 +278,45 @@ Only return the JSON array, no other text."""
 
 def select_top_topic(scored_topics: list[dict]) -> dict:
     """
-    Select the highest-scoring topic.
+    Select the highest-scoring topic that hasn't been used before.
+
+    Checks the source URL against previously used URLs to prevent
+    selecting the same tweet/article twice.
 
     Args:
         scored_topics: List of topics with scores
 
     Returns:
-        The top-scoring topic dictionary
+        The top-scoring unused topic dictionary
     """
     if not scored_topics:
-        return {"topic": "No topics available", "score": 0}
+        return {"topic": "No topics available", "score": 0, "url": ""}
+
+    # Get previously used URLs from Google Sheets
+    from sheets_client import get_used_urls
+    used_urls = get_used_urls()
 
     # Sort by score descending
     sorted_topics = sorted(scored_topics, key=lambda x: x.get("score", 0), reverse=True)
-    top = sorted_topics[0]
 
-    logger.info(f"Selected top topic: {top.get('topic', '')} (Score: {top.get('score', 0)}/10)")
-    return top
+    # Find the first topic with an unused URL
+    for topic in sorted_topics:
+        topic_url = topic.get("url", "")
+
+        if not topic_url:
+            # No URL means we can't track it - use it anyway
+            logger.warning(f"Topic has no URL, selecting anyway: {topic.get('topic', '')[:50]}")
+            return topic
+
+        if topic_url not in used_urls:
+            logger.info(f"Selected topic: {topic.get('topic', '')[:50]} (Score: {topic.get('score', 0)}/10)")
+            return topic
+        else:
+            logger.info(f"Skipping already used topic: {topic.get('topic', '')[:50]} (URL: {topic_url[:50]})")
+
+    # All topics have been used - return the top one anyway with a warning
+    logger.warning("All topics have been used before! Selecting top scorer anyway.")
+    return sorted_topics[0]
 
 
 async def generate_scripts(topic: dict) -> list[dict]:
