@@ -10,7 +10,9 @@ The bot sends progress updates during pipeline execution.
 """
 
 import asyncio
+import json
 import logging
+from pathlib import Path
 from typing import Optional
 
 from telegram import Update
@@ -23,6 +25,41 @@ from telegram.ext import (
 from config import config
 
 logger = logging.getLogger(__name__)
+
+# File to store registered chat IDs
+CHATS_FILE = Path(__file__).parent.parent / "registered_chats.json"
+
+
+def load_registered_chats() -> set[str]:
+    """Load registered chat IDs from file."""
+    try:
+        if CHATS_FILE.exists():
+            with open(CHATS_FILE, "r") as f:
+                return set(json.load(f))
+    except Exception as e:
+        logger.error(f"Failed to load registered chats: {e}")
+    return set()
+
+
+def save_registered_chats(chats: set[str]) -> None:
+    """Save registered chat IDs to file."""
+    try:
+        with open(CHATS_FILE, "w") as f:
+            json.dump(list(chats), f)
+        logger.info(f"Saved {len(chats)} registered chats")
+    except Exception as e:
+        logger.error(f"Failed to save registered chats: {e}")
+
+
+def register_chat(chat_id: str) -> bool:
+    """Register a new chat ID. Returns True if newly registered."""
+    chats = load_registered_chats()
+    if chat_id not in chats:
+        chats.add(chat_id)
+        save_registered_chats(chats)
+        logger.info(f"Registered new chat: {chat_id}")
+        return True
+    return False
 
 # Global application instance
 _app: Optional[Application] = None
@@ -40,32 +77,43 @@ async def get_bot():
 
 async def send_progress(message: str, chat_id: Optional[str] = None) -> bool:
     """
-    Send a progress update message.
+    Send a progress update message to all registered chats.
 
     Args:
         message: The message to send
-        chat_id: Optional chat ID (defaults to configured TELEGRAM_CHAT_ID)
+        chat_id: Optional specific chat ID (if None, sends to all registered)
 
     Returns:
-        True if sent successfully, False otherwise
+        True if sent to at least one chat successfully, False otherwise
     """
-    target_chat = chat_id or config.TELEGRAM_CHAT_ID
+    bot = await get_bot()
+    success = False
 
-    if not target_chat:
-        logger.warning("No chat ID configured for progress messages")
+    # Get target chats
+    if chat_id:
+        target_chats = [chat_id]
+    else:
+        # Send to all registered chats + configured chat ID
+        target_chats = list(load_registered_chats())
+        if config.TELEGRAM_CHAT_ID and config.TELEGRAM_CHAT_ID not in target_chats:
+            target_chats.append(config.TELEGRAM_CHAT_ID)
+
+    if not target_chats:
+        logger.warning("No chat IDs configured for progress messages")
         return False
 
-    try:
-        bot = await get_bot()
-        await bot.send_message(
-            chat_id=target_chat,
-            text=message,
-            parse_mode="HTML"
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send progress message: {str(e)}")
-        return False
+    for target in target_chats:
+        try:
+            await bot.send_message(
+                chat_id=target,
+                text=message,
+                parse_mode="HTML"
+            )
+            success = True
+        except Exception as e:
+            logger.error(f"Failed to send to chat {target}: {str(e)}")
+
+    return success
 
 
 async def send_error(error_message: str, chat_id: Optional[str] = None) -> bool:
@@ -157,18 +205,35 @@ async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command - welcome message."""
-    chat_id = update.effective_chat.id
-    await update.message.reply_text(
-        f"👋 Welcome to PL Content Bot!\n\n"
-        f"Your Chat ID: <code>{chat_id}</code>\n\n"
-        f"Commands:\n"
-        f"/go - Generate content ideas now\n"
-        f"/recent - Show recent topics\n"
-        f"/status - Check bot status\n\n"
-        f"The bot also runs automatically at 8:00 AM UK time daily.",
-        parse_mode="HTML"
-    )
+    """Handle /start command - welcome message and auto-register."""
+    chat_id = str(update.effective_chat.id)
+
+    # Auto-register this chat
+    is_new = register_chat(chat_id)
+
+    if is_new:
+        await update.message.reply_text(
+            f"👋 Welcome to PL Content Bot!\n\n"
+            f"✅ <b>You are now registered!</b>\n"
+            f"You will receive all updates and notifications.\n\n"
+            f"Commands:\n"
+            f"/go - Generate content ideas now\n"
+            f"/recent - Show recent topics\n"
+            f"/status - Check bot status\n\n"
+            f"The bot also runs automatically at 8:00 AM UK time daily.",
+            parse_mode="HTML"
+        )
+        logger.info(f"New user registered: {chat_id}")
+    else:
+        await update.message.reply_text(
+            f"👋 Welcome back!\n\n"
+            f"You're already registered for updates.\n\n"
+            f"Commands:\n"
+            f"/go - Generate content ideas now\n"
+            f"/recent - Show recent topics\n"
+            f"/status - Check bot status",
+            parse_mode="HTML"
+        )
 
 
 def create_application() -> Application:

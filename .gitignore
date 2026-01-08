@@ -1,6 +1,7 @@
 # Environment and secrets
 .env
 credentials.json
+registered_chats.json
 *.key
 *.pem
 
