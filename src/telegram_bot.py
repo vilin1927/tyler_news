@@ -2,9 +2,12 @@
 Telegram Bot interface for Premier League Content Automation.
 
 Commands:
+- /start - Welcome message and auto-register for updates
 - /go - Trigger the content pipeline manually
-- /status - Check if the bot is running
+- /status - Check bot status and schedule state
 - /recent - Show recent generated topics
+- /pause - Pause daily scheduled runs (8 AM cron)
+- /resume - Resume daily scheduled runs
 
 The bot sends progress updates during pipeline execution.
 """
@@ -12,6 +15,7 @@ The bot sends progress updates during pipeline execution.
 import asyncio
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +32,9 @@ logger = logging.getLogger(__name__)
 
 # File to store registered chat IDs
 CHATS_FILE = Path(__file__).parent.parent / "registered_chats.json"
+
+# File to store schedule state (pause/resume)
+SCHEDULE_STATE_FILE = Path(__file__).parent.parent / "schedule_state.json"
 
 
 def load_registered_chats() -> set[str]:
@@ -60,6 +67,33 @@ def register_chat(chat_id: str) -> bool:
         logger.info(f"Registered new chat: {chat_id}")
         return True
     return False
+
+
+def load_schedule_state() -> dict:
+    """Load schedule state from file."""
+    try:
+        if SCHEDULE_STATE_FILE.exists():
+            with open(SCHEDULE_STATE_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load schedule state: {e}")
+    return {"paused": False, "paused_by": None, "paused_at": None}
+
+
+def save_schedule_state(state: dict) -> None:
+    """Save schedule state to file."""
+    try:
+        with open(SCHEDULE_STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        logger.info(f"Saved schedule state: paused={state.get('paused')}")
+    except Exception as e:
+        logger.error(f"Failed to save schedule state: {e}")
+
+
+def is_schedule_paused() -> bool:
+    """Check if scheduled runs are paused."""
+    return load_schedule_state().get("paused", False)
+
 
 # Global application instance
 _app: Optional[Application] = None
@@ -170,13 +204,25 @@ async def cmd_go(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /status command - check bot status."""
-    await update.message.reply_text(
-        "✅ Bot is running!\n\n"
-        "Commands:\n"
-        "/go - Generate content ideas\n"
-        "/recent - Show recent topics\n"
-        "/status - Check bot status"
+    state = load_schedule_state()
+    schedule_status = "⏸ PAUSED" if state.get("paused") else "▶️ Active"
+
+    status_msg = f"✅ <b>Bot is running!</b>\n\n"
+    status_msg += f"<b>Schedule:</b> {schedule_status}\n"
+
+    if state.get("paused"):
+        status_msg += f"Paused at: {state.get('paused_at', 'Unknown')}\n"
+
+    status_msg += (
+        f"\n<b>Commands:</b>\n"
+        f"/go - Generate content ideas\n"
+        f"/recent - Show recent topics\n"
+        f"/status - Check bot status\n"
+        f"/pause - Pause daily runs\n"
+        f"/resume - Resume daily runs"
     )
+
+    await update.message.reply_text(status_msg, parse_mode="HTML")
 
 
 async def cmd_recent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -236,6 +282,69 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /pause command - pause daily scheduled runs."""
+    chat_id = str(update.effective_chat.id)
+    logger.info(f"/pause command received from chat {chat_id}")
+
+    state = load_schedule_state()
+    if state.get("paused"):
+        await update.message.reply_text(
+            f"⏸ Schedule is already paused.\n"
+            f"Paused by: {state.get('paused_by', 'Unknown')}\n"
+            f"Paused at: {state.get('paused_at', 'Unknown')}\n\n"
+            f"Use /resume to re-enable.",
+            parse_mode="HTML"
+        )
+        return
+
+    state = {
+        "paused": True,
+        "paused_by": chat_id,
+        "paused_at": datetime.now().isoformat()
+    }
+    save_schedule_state(state)
+
+    await update.message.reply_text(
+        "⏸ <b>Daily schedule paused</b>\n\n"
+        "The 8 AM automatic run is now disabled.\n"
+        "Manual /go commands still work.\n\n"
+        "Use /resume to re-enable.",
+        parse_mode="HTML"
+    )
+
+
+async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /resume command - resume daily scheduled runs."""
+    chat_id = str(update.effective_chat.id)
+    logger.info(f"/resume command received from chat {chat_id}")
+
+    state = load_schedule_state()
+    if not state.get("paused"):
+        await update.message.reply_text(
+            "▶️ Schedule is already active.\n"
+            "Daily runs at 8 AM UK time are enabled.",
+            parse_mode="HTML"
+        )
+        return
+
+    state = {
+        "paused": False,
+        "paused_by": None,
+        "paused_at": None,
+        "resumed_by": chat_id,
+        "resumed_at": datetime.now().isoformat()
+    }
+    save_schedule_state(state)
+
+    await update.message.reply_text(
+        "▶️ <b>Daily schedule resumed</b>\n\n"
+        "The 8 AM automatic run is now enabled.\n"
+        "Next run: Tomorrow at 8:00 AM UK time.",
+        parse_mode="HTML"
+    )
+
+
 def create_application() -> Application:
     """Create and configure the Telegram bot application."""
     global _app
@@ -251,6 +360,8 @@ def create_application() -> Application:
     _app.add_handler(CommandHandler("go", cmd_go))
     _app.add_handler(CommandHandler("status", cmd_status))
     _app.add_handler(CommandHandler("recent", cmd_recent))
+    _app.add_handler(CommandHandler("pause", cmd_pause))
+    _app.add_handler(CommandHandler("resume", cmd_resume))
 
     logger.info("Telegram bot application created")
     return _app

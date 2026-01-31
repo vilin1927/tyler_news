@@ -66,7 +66,13 @@ async def run_scheduled():
     try:
         # Import here to ensure config is loaded
         from main import run_pipeline
-        from telegram_bot import send_progress
+        from telegram_bot import send_progress, is_schedule_paused
+
+        # Check if schedule is paused
+        if is_schedule_paused():
+            logger.info("Scheduled run is PAUSED - skipping execution")
+            await send_progress("⏸ Scheduled run skipped (paused)\n\nUse /resume to re-enable.")
+            return {"success": True, "skipped": True, "reason": "paused"}
 
         # Send start notification
         await send_progress("🕐 Scheduled run starting (8:00 AM UK)...")
