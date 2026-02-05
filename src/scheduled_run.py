@@ -71,7 +71,6 @@ async def run_scheduled():
         # Check if schedule is paused
         if is_schedule_paused():
             logger.info("Scheduled run is PAUSED - skipping execution")
-            await send_progress("⏸ Scheduled run skipped (paused)\n\nUse /resume to re-enable.")
             return {"success": True, "skipped": True, "reason": "paused"}
 
         # Send start notification
